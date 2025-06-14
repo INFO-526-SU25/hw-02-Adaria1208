@@ -1,6 +1,6 @@
 ---
 title: "HW 02"
-author: "INSERT YOUR NAME HERE"
+author: "Adaria Blackwell"
 format: 
   html:
     embed-resources: true
@@ -10,21 +10,315 @@ toc: true
 ## 1 - A new day, a new plot, a new geom
 
 ```{r}
-#| label: label-me-1
+#| label: Question 1
+install.packages("ggridges")
+library(ggridges)
+install.packages("tidyverse")
+library(tidyverse)
+install.packages("remotes")
+remotes::install_github("tidyverse/dsbox")  # dev build
+library(dsbox)
 
+data(edibnb)
+
+# Ordered neighborhoods by median scores
+edibnb_ordered <- edibnb %>%
+  group_by(neighbourhood) %>%
+  mutate(median_score = median(review_scores_rating, na.rm = TRUE)) %>%
+  arrange(median_score)
+
+# Create a ridgeline plot
+ggplot(edibnb_ordered, aes(x= review_scores_rating, y = fct_reorder(neighbourhood, median_score))) +
+  geom_density_ridges() + 
+  labs(
+    title = "Distribution of Airbnb Review Scores by Neighborhood", 
+    x = "Review Score",
+    y = "Neighborhood"
+  ) +
+  theme_minimal()
 ```
 
-## 2 - Foreign Connected PACs
+Q1. When looking at this graph that shows the Review Score from each neighborhood it looks like that all the Neighborhoods have a highscore over 75 nobody is lower than that. \## 2 - Foreign Connected PACs
 
 ```{r}
-#| label: label-me-2
+#| label: Question 2
+install.packages("janitor")
+library(janitor)
+library(fs)
+
+#Load data using the code given and clean data for use
+list_of_files <- dir_ls(path = "data", regexp = "Foreign Connected PAC")
+
+pac <- read_csv(list_of_files, id = "year") %>%
+  clean_names()
+
+# Fix the "year" column
+pac <- pac |>
+  mutate(
+    year = str_extract(year, "\\d{4}(?=\\.csv$)") |> as.integer()
+  )
+glimpse(pac)
+
+# Seperate Country of Origin and Parent Company
+pac <- pac |>
+  separate(
+    country_of_origin_parent_company,
+    into = c("country_of_origin", "parent_compnay"),
+    sep = "/",     # Split at the slash
+    extra = "merge",
+    fill = "right",
+    remove = TRUE
+  ) 
+
+# Pivot the data longer
+pac_long <- pac %>%
+  pivot_longer(cols = c(dems, repubs),
+               names_to = "party",
+               values_to = "amount") %>%
+  mutate(party = case_when(
+    party == "dems" ~ "Democrat",
+    party == "repubs" ~ "Republican"
+  ))
+
+# Filter and Summarize for UK
+
+pac_long <- pac %>%
+  pivot_longer(cols = c(dems, repubs),
+               names_to = "party",
+               values_to = "amount") %>%
+  mutate(
+    party  = recode(party,
+                    dems   = "Democrat",
+                    repubs = "Republican"),
+    year   = as.integer(year),  
+    amount = parse_number(amount)            
+  )
+
+UKpac <- pac_long %>%
+  filter(country_of_origin == "UK") %>%
+  group_by(year, party) %>%
+  summarize(total= sum(amount, na.rm = TRUE), .groups = "drop")
+
+# Visualize UK results
+ggplot(UKpac,
+       aes(year, total, colour = party)) +
+  geom_line(linewidth = .9) +
+  geom_point(size = 2) +
+  scale_color_manual(
+    values = c(
+      "Democrat" = "blue",
+      "Republican" = "red"
+    )
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(title = "PAC money from the UK",
+       y = "Total contributed to each party",
+       x = NULL,
+       colour = NULL) +
+  theme_minimal(base_size = 13)
+```
+
+Q2. Recreation of the visualization but using data from Japan.
+
+```{r}
+Japan_pac <- pac_long %>%
+  filter(country_of_origin == "Japan") %>%
+  group_by(year, party) %>%
+  summarise(total = sum(amount, na.rm = TRUE),
+            .groups = "drop")
+
+#Visualization for Japan
+ggplot(Japan_pac,
+       aes(year, total, colour = party)) +
+  geom_line(linewidth = .9) +
+  geom_point(size = 2) +
+  scale_color_manual(
+    values = c(
+      "Democrat" = "blue",
+      "Republican" = "red"
+    )
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(title = "PAC money from the UK",
+       y = "Total contributed to each party",
+       x = NULL,
+       colour = NULL) +
+  theme_minimal(base_size = 13)
 
 ```
 
 ## 3 - Median housing prices in the US
 
+```{r}
+library(lubridate)
 
-## 4 - Expect More. Plot More.
+housing   <- read_csv("data/median-housing.csv") 
+recessions <- read_csv("data/recessions.csv")     
 
+housing <- housing %>% 
+  rename(date = DATE, price = MSPUS) %>% 
+  mutate(date = as.Date(date))
+
+# Recreate the first visulization
+ggplot(housing, aes(date, price)) +
+  geom_line(color = "blue") +
+  labs(title = "Median sale price of US houses (1963–present)",
+       y = "USD (not inflation‑adjusted)",
+       x = NULL) +
+  theme_minimal()
+
+```
+
+Q3b. Identify recessions and recreate the given visualization
+
+```{r}
+# make sure every date column really is Date
+recessions <- recessions %>% mutate(across(c(Peak, Trough), as.Date))
+housing    <- housing    %>% mutate(date = as.Date(date))
+
+# boundaries of the housing series
+rng <- range(housing$date, na.rm = TRUE)
+
+recessions <- recessions %>%
+  mutate(on_chart = Trough >= rng[1] & Peak <= rng[2])  
+
+ggplot(housing, aes(date, price)) +
+  geom_rect(data = filter(recessions, on_chart),
+            aes(xmin = Peak, xmax = Trough,
+                ymin = -Inf,  ymax =  Inf),
+            inherit.aes = FALSE,
+            fill = "grey70", alpha = 0.4) +
+  geom_line(color = "blue") +
+  scale_x_date(
+    date_breaks = "5 years",              
+    date_labels = "%Y"                     
+  ) +
+  labs(title = "US median housing price with NBER recession bands",
+       subtitle = "Not seasonally adjusted",
+       x = NULL, y = "USD") +
+  theme_minimal()
+
+```
+
+Q3c. Create a subset dataset and recreate the visualization
+
+```{r}
+Q_housing <- housing %>% 
+  filter(date >= as.Date("2019-01-01"), date <= as.Date("2020-12-31")) %>% 
+  mutate(
+    year = year(date),
+    qtr_label = paste0(year, " Q", quarter(date))
+  ) %>%
+  group_by(qtr_label) %>%
+  summarize(price = median(price, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    qtr_label = factor(qtr_label, levels = c(
+      "2019 Q1", "2019 Q2", "2019 Q3", "2019 Q4",
+      "2020 Q1", "2020 Q2", "2020 Q3", "2020 Q4"
+    ))
+  )
+
+ggplot(Q_housing, aes(x = qtr_label, y = price, group = 1)) +  
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "blue", size = 3) +
+  labs(
+    title = "Median sales price of houses sold in the United States",
+    subtitle = "Not seasonally adjusted",
+    x = NULL,
+    y = "Dollars"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+library(tibble)
+library(ggplot2)
+
+make_circle <- function(radius, n = 360) {
+  tibble(
+    x = radius * cos(seq(0, 2 * pi, length.out = n)),
+    y = radius * sin(seq(0, 2 * pi, length.out = n))
+  )
+}
+
+# data for the three rings
+outer_red   <- make_circle(1)      # outer red disk
+inner_white <- make_circle(0.60)   # hides the middle, leaves a red ring
+center_red  <- make_circle(0.20)   # the bull's‑eye
+
+# plot
+ggplot() +
+  geom_polygon(data = outer_red,   aes(x, y), fill = "red",   colour = NA) +
+  geom_polygon(data = inner_white, aes(x, y), fill = "white", colour = NA) +
+  geom_polygon(data = center_red,  aes(x, y), fill = "red",   colour = NA) +
+  coord_fixed() +          # equal x/y scale → perfect circles
+  theme_void() +           # no axes, ticks, etc.
+  annotate(                # optional word‑mark
+    "text",
+    x = 0, y = -1.35,
+    label = "TARGET\u00AE",
+    family = "sans",
+    fontface = "bold",
+    size = 8,
+    colour = "red"
+  )
+```
+
+Q4. I used basic geometry to recreate the Target logo by layering three circles each having a smaller radius. The largest red circle was drawn first, followed by a smaller white circle, and then a small red circle at the center. The `ggplot2` package was used to layer the circles to give that Target logo look.
 
 ## 5 - Mirror, mirror on the wall, who’s the ugliest of them all?
+
+```{r}
+install.packages("palmerpenguins")
+library(palmerpenguins)
+
+# A. Default theme plot 
+data("penguins")
+
+  ggplot(penguins,
+                  aes(flipper_length_mm, body_mass_g, colour = species)) +
+  geom_point(alpha = 0.8) +
+  labs(title = "Penguin flipper length vs body mass",
+       x = "Flipper length (mm)",
+       y = "Body mass (g)") +
+  theme_minimal()
+
+```
+
+Q5b. The ugliest graph I could make
+
+```{r}
+# B. crank the ugliness to 11
+ggplot(penguins,
+       aes(bill_depth_mm, bill_length_mm,
+           colour = island, shape = sex)) +
+  geom_point(size = 6, stroke = 1.5, fill = "yellow") +
+  scale_colour_manual(
+    values = c("blue",          # bright lime in hex
+               "hotpink",
+               "green")
+    # or: values = c("limegreen", "hotpink", "green")
+  ) +
+  scale_shape_manual(values = c(21, 24)) +          # circle‑filled, triangle‑filled
+  labs(title = "Penguin bill depth vs length",
+       x = "bill depth",
+       y = "bill length") +
+  theme(
+    plot.background  = element_rect(fill = "black",
+                                    colour = "lavender",
+                                    linewidth = 8),
+    panel.background = element_rect(fill = "purple"),
+    panel.grid.major = element_line(colour = "orange",
+                                    linetype = "dotted",
+                                    linewidth = 1.2),
+    panel.grid.minor = element_line(colour = "blue",
+                                    linetype = "dashed"),
+    text             = element_text(family = "Comic Sans MS",
+                                    face   = "bold",
+                                    size   = 20,
+                                    colour = "red"),
+    legend.position  = "bottom"
+  )
+```
